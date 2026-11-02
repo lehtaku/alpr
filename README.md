@@ -22,3 +22,7 @@ go test ./...
 go vet ./...
 golangci-lint run
 ```
+
+## License
+
+MIT; see [LICENSE](LICENSE).
