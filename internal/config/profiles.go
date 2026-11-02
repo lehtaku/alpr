@@ -45,6 +45,15 @@ func (c *Config) Select(name, repo string) (*Profile, error) {
 	}
 }
 
+// All returns every profile in name order.
+func (c *Config) All() []*Profile {
+	profiles := make([]*Profile, 0, len(c.Profiles))
+	for _, name := range c.names() {
+		profiles = append(profiles, c.Profiles[name])
+	}
+	return profiles
+}
+
 // Matches reports whether one of the profile's patterns covers repo (host/owner/repo), ignoring case.
 func (p *Profile) Matches(repo string) bool {
 	repo = strings.ToLower(repo)

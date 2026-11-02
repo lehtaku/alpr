@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -39,4 +40,32 @@ func readKeychain(service, account string) (string, error) {
 		return "", domain.Errorf(domain.CodeAuthMissing, "the Keychain item keychain:%s/%s is empty", service, account)
 	}
 	return token, nil
+}
+
+// writeKeychain stores token as the generic password for service and account, replacing any earlier one.
+// The command goes to `security -i` on stdin, so the token never appears in process arguments.
+func writeKeychain(service, account, token string) error {
+	if runtime.GOOS != "darwin" {
+		return domain.Errorf(domain.CodeUsage, "keychain: token references need macOS; use env:<NAME> instead")
+	}
+
+	cmd := exec.Command(securityCommand, "-i")
+	cmd.Stdin = strings.NewReader(fmt.Sprintf("add-generic-password -U -s %s -a %s -w %s\n",
+		quote(service), quote(account), quote(token)))
+	// security's output isn't shown: in interactive mode it could echo the command, token included.
+	if err := cmd.Run(); err != nil {
+		return domain.Errorf(domain.CodeInternal, "can't write keychain:%s/%s: %v", service, account, err)
+	}
+
+	// Interactive mode exits 0 even when a command fails, so read the item back to confirm.
+	stored, err := readKeychain(service, account)
+	if err != nil || stored != token {
+		return domain.Errorf(domain.CodeInternal, "the token wasn't stored in keychain:%s/%s", service, account)
+	}
+	return nil
+}
+
+// quote makes s one argument for `security -i`, which understands double quotes with backslash escapes.
+func quote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }

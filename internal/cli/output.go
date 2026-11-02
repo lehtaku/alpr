@@ -14,6 +14,13 @@ type errorBody struct {
 	Details map[string]any `json:"details"`
 }
 
+// writeJSON prints a --json result.
+func writeJSON(w io.Writer, v any) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(v)
+}
+
 // writeError prints err as one JSON object with --json, otherwise as "alpr: <message>".
 func writeError(w io.Writer, err *domain.Error, asJSON bool) {
 	if !asJSON {

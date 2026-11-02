@@ -19,8 +19,12 @@ type errorOutput struct {
 }
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
+	return runWithInput("", args...)
+}
+
+func runWithInput(stdin string, args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
-	code = run(args, &out, &errOut)
+	code = run(args, strings.NewReader(stdin), &out, &errOut)
 	return code, out.String(), errOut.String()
 }
 

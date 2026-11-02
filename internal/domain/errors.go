@@ -1,7 +1,10 @@
 // Package domain holds platform-neutral models, errors and rules. It imports nothing from the project.
 package domain
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Code is a stable error code from the spec (§6).
 type Code string
@@ -68,4 +71,20 @@ func Errorf(code Code, format string, args ...any) *Error {
 
 func (e *Error) Error() string {
 	return e.Message
+}
+
+// ErrorItem is a failure reported inside an otherwise successful result.
+type ErrorItem struct {
+	Scope   string `json:"scope"`
+	Code    Code   `json:"code"`
+	Message string `json:"message"`
+}
+
+// NewErrorItem describes err for scope; errors without a code count as internal.
+func NewErrorItem(scope string, err error) ErrorItem {
+	var domainErr *Error
+	if errors.As(err, &domainErr) {
+		return ErrorItem{Scope: scope, Code: domainErr.Code, Message: domainErr.Message}
+	}
+	return ErrorItem{Scope: scope, Code: CodeInternal, Message: err.Error()}
 }

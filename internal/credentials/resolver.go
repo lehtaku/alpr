@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/lehtaku/alpr/internal/domain"
 )
@@ -47,4 +48,19 @@ func Resolve(raw string) (string, error) {
 		return "", domain.Errorf(domain.CodeAuthMissing, "environment variable %s is not set or empty", ref.EnvName)
 	}
 	return token, nil
+}
+
+// Store saves token in the Keychain item that a keychain: reference points to.
+func Store(raw, token string) error {
+	ref, err := ParseReference(raw)
+	if err != nil {
+		return err
+	}
+	if ref.EnvName != "" {
+		return domain.Errorf(domain.CodeUsage, "this token comes from env:%s; set that environment variable instead", ref.EnvName)
+	}
+	if token == "" || strings.ContainsFunc(token, unicode.IsControl) {
+		return domain.Errorf(domain.CodeUsage, "the token is empty or contains line breaks or control characters")
+	}
+	return writeKeychain(ref.Service, ref.Account, token)
 }
