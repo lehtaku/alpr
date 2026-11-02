@@ -14,6 +14,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/lehtaku/alpr/internal/credentials"
 	"github.com/lehtaku/alpr/internal/domain"
 )
 
@@ -114,6 +115,9 @@ func (p *Profile) validate() error {
 	if p.Token == "" {
 		return errors.New("token is required")
 	}
+	if _, err := credentials.ParseReference(p.Token); err != nil {
+		return err
+	}
 	if p.BaseURL != "" {
 		if err := validateURL("base_url", p.BaseURL); err != nil {
 			return err
@@ -133,6 +137,9 @@ func (t *Tracker) validate() error {
 	case TrackerJira:
 		if t.BaseURL == "" || t.Username == "" || t.Token == "" {
 			return errors.New("a jira tracker needs base_url, username and token")
+		}
+		if _, err := credentials.ParseReference(t.Token); err != nil {
+			return fmt.Errorf("tracker %v", err)
 		}
 		return validateURL("tracker.base_url", t.BaseURL)
 	case TrackerGitHubIssues:

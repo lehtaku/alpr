@@ -90,6 +90,8 @@ func TestLoadInvalid(t *testing.T) {
 		{"two-segment pattern", strings.Replace(github, "github.com/o/*", "github.com/*", 1), "host/owner/repo"},
 		{"malformed pattern", strings.Replace(github, "github.com/o/*", "github.com/[o/*", 1), "syntax error in pattern"},
 		{"no token", strings.Replace(github, "token = \"env:T\"\n", "", 1), "token is required"},
+		{"raw token", strings.Replace(github, "env:T", "ghp_pastedToken", 1), "token must be a reference"},
+		{"raw jira token", github + "[profiles.p.tracker]\ntype = \"jira\"\nbase_url = \"https://x.atlassian.net\"\nusername = \"u@example.com\"\ntoken = \"pastedToken\"\n", "tracker token must be a reference"},
 		{"bad base_url", github + "base_url = \"api.github.com\"\n", "base_url must be an http(s) URL"},
 		{"bad tracker type", github + "[profiles.p.tracker]\ntype = \"linear\"\n", "tracker.type must be"},
 		{"jira without username", github + "[profiles.p.tracker]\ntype = \"jira\"\nbase_url = \"https://x.atlassian.net\"\ntoken = \"env:J\"\n", "needs base_url, username and token"},
