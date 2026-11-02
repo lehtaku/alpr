@@ -1,0 +1,10 @@
+# Personal Claude context docs (symlinked by sync_claude_docs.sh)
+docs/claude/
+
+# Go
+/alpr
+*.test
+*.out
+
+# macOS
+.DS_Store
