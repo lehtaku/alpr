@@ -24,3 +24,12 @@ func (p *Provider) CurrentUser(ctx context.Context) (domain.User, error) {
 	}
 	return mapUser(user), nil
 }
+
+// PullRequest isn't implemented for GitHub yet.
+func (p *Provider) PullRequest(context.Context, string, string, string) (domain.PullRequest, error) {
+	return domain.PullRequest{}, &domain.Error{
+		Code:    domain.CodeUnsupported,
+		Message: "pr show doesn't support GitHub yet",
+		Details: map[string]any{"capability": "pr_show", "platform": "github"},
+	}
+}

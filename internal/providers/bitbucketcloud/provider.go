@@ -24,3 +24,16 @@ func (p *Provider) CurrentUser(ctx context.Context) (domain.User, error) {
 	}
 	return mapUser(user), nil
 }
+
+// PullRequest returns pull request id of workspace/slug with its reviewers and comment threads.
+func (p *Provider) PullRequest(ctx context.Context, workspace, slug, id string) (domain.PullRequest, error) {
+	pr, err := p.client.pullRequest(ctx, workspace, slug, id)
+	if err != nil {
+		return domain.PullRequest{}, err
+	}
+	comments, err := p.client.comments(ctx, workspace, slug, id)
+	if err != nil {
+		return domain.PullRequest{}, err
+	}
+	return mapPullRequest(pr, comments), nil
+}

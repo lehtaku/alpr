@@ -62,7 +62,7 @@ func newRootCommand(flags *globalFlags) *cobra.Command {
 	persistent.StringVar(&flags.profile, "profile", "", "use this profile instead of matching the repository")
 	persistent.StringVar(&flags.repo, "repo", "", "act on `host/owner/repo` instead of the current directory's origin remote")
 
-	root.AddCommand(newAuthCommand(flags))
+	root.AddCommand(newAuthCommand(flags), newPRCommand(flags))
 	return root
 }
 
