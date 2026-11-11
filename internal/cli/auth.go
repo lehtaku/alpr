@@ -25,8 +25,7 @@ func newAuthCommand(flags *globalFlags) *cobra.Command {
 }
 
 func newAuthSetCommand(flags *globalFlags) *cobra.Command {
-	var tracker bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "set <profile>",
 		Short: "Store a profile's token in the macOS Keychain",
 		Long:  "Store a profile's token in the macOS Keychain item its token reference names.\nThe token is read from a hidden prompt, or from stdin when it's piped in.",
@@ -36,7 +35,7 @@ func newAuthSetCommand(flags *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stored, err := services.SetToken(cfg, args[0], tracker, func(label string) (string, error) {
+			stored, err := services.SetToken(cfg, args[0], func(label string) (string, error) {
 				return readToken(cmd, label)
 			})
 			if err != nil {
@@ -45,12 +44,10 @@ func newAuthSetCommand(flags *globalFlags) *cobra.Command {
 			if flags.json {
 				return writeJSON(cmd.OutOrStdout(), stored)
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Stored the %s token of profile %q in %s.\n", stored.Target, stored.Profile, stored.TokenRef)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Stored the token of profile %q in %s.\n", stored.Profile, stored.TokenRef)
 			return err
 		},
 	}
-	cmd.Flags().BoolVar(&tracker, "tracker", false, "store the tracker token instead of the provider token")
-	return cmd
 }
 
 // readToken prompts without echo on a terminal, and otherwise reads the token piped to stdin.
@@ -76,7 +73,7 @@ func readToken(cmd *cobra.Command, label string) (string, error) {
 func newAuthTestCommand(flags *globalFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "test",
-		Short: "Check that each profile's tokens work",
+		Short: "Check that each profile's token works",
 		Long:  "Ask each platform who the token belongs to, for all profiles or only --profile.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -105,18 +102,9 @@ func newAuthTestCommand(flags *globalFlags) *cobra.Command {
 
 func writeChecks(w io.Writer, checks []services.ProfileCheck) error {
 	table := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(table, "PROFILE\tTARGET\tTYPE\tRESULT")
+	_, _ = fmt.Fprintln(table, "PROFILE\tPROVIDER\tRESULT")
 	for _, profile := range checks {
-		rows := []struct {
-			target string
-			check  *services.Check
-		}{{"provider", &profile.Provider}, {"tracker", profile.Tracker}}
-		for _, row := range rows {
-			if row.check == nil {
-				continue
-			}
-			_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", profile.Profile, row.target, row.check.Type, checkResult(row.check))
-		}
+		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\n", profile.Profile, profile.Provider.Type, checkResult(&profile.Provider))
 	}
 	return table.Flush()
 }
@@ -134,10 +122,8 @@ func checkResult(check *services.Check) string {
 // firstFailure returns the exit status of the first failed check, which the output already describes.
 func firstFailure(checks []services.ProfileCheck) error {
 	for _, profile := range checks {
-		for _, check := range []*services.Check{&profile.Provider, profile.Tracker} {
-			if check != nil && !check.OK {
-				return exitStatus(check.Error.Code.ExitCode())
-			}
+		if check := profile.Provider; !check.OK {
+			return exitStatus(check.Error.Code.ExitCode())
 		}
 	}
 	return nil

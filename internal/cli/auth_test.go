@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// fakeAPIs serves GitHub's GET /user and Jira's GET /rest/api/3/myself; any other token gets 401.
-func fakeAPIs(t *testing.T) (githubURL, jiraURL string) {
+// fakeGitHub serves GitHub's GET /user; any token other than good-github gets 401.
+func fakeGitHub(t *testing.T) string {
 	t.Helper()
 	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer good-github" {
@@ -21,16 +21,8 @@ func fakeAPIs(t *testing.T) (githubURL, jiraURL string) {
 		}
 		_, _ = w.Write([]byte(`{"id": 42, "login": "someone", "name": "Some One"}`))
 	}))
-	jira := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, token, _ := r.BasicAuth(); token != "good-jira" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		_, _ = w.Write([]byte(`{"accountId": "5b10", "displayName": "Jira User"}`))
-	}))
 	t.Cleanup(github.Close)
-	t.Cleanup(jira.Close)
-	return github.URL, jira.URL
+	return github.URL
 }
 
 // useConfig writes config.toml under a temporary XDG_CONFIG_HOME.
@@ -47,7 +39,7 @@ func useConfig(t *testing.T, content string) {
 }
 
 func authConfig(t *testing.T) {
-	githubURL, jiraURL := fakeAPIs(t)
+	githubURL := fakeGitHub(t)
 	useConfig(t, `
 [profiles.personal]
 provider = "github"
@@ -55,36 +47,27 @@ base_url = "`+githubURL+`"
 match    = ["github.com/someone/*"]
 token    = "env:ALPR_TEST_GITHUB"
 
-[profiles.personal.tracker]
-type = "github-issues"
-
 [profiles.work]
 provider = "github"
 base_url = "`+githubURL+`"
 match    = ["github.com/acme/*"]
-token    = "env:ALPR_TEST_GITHUB"
-
-[profiles.work.tracker]
-type     = "jira"
-base_url = "`+jiraURL+`"
-username = "you@example.com"
-token    = "env:ALPR_TEST_JIRA"
+token    = "env:ALPR_TEST_WORK"
 `)
 }
 
 func TestAuthTestAllPass(t *testing.T) {
 	authConfig(t)
 	t.Setenv("ALPR_TEST_GITHUB", "good-github")
-	t.Setenv("ALPR_TEST_JIRA", "good-jira")
+	t.Setenv("ALPR_TEST_WORK", "good-github")
 
 	code, stdout, stderr := runArgs("auth", "test")
 	if code != 0 || stderr != "" {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
 	for _, want := range []string{
-		"personal  provider  github         ok: Some One (someone)",
-		"personal  tracker   github-issues  ok: Some One (someone)",
-		"work      tracker   jira           ok: Jira User",
+		"PROFILE   PROVIDER  RESULT",
+		"personal  github    ok: Some One (someone)",
+		"work      github    ok: Some One (someone)",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
@@ -95,39 +78,34 @@ func TestAuthTestAllPass(t *testing.T) {
 func TestAuthTestJSONWithFailure(t *testing.T) {
 	authConfig(t)
 	t.Setenv("ALPR_TEST_GITHUB", "good-github")
-	t.Setenv("ALPR_TEST_JIRA", "bad-jira")
+	t.Setenv("ALPR_TEST_WORK", "bad-github")
 
-	code, stdout, stderr := runArgs("auth", "test", "--json", "--profile", "work")
+	code, stdout, stderr := runArgs("auth", "test", "--json")
 	if code != 3 || stderr != "" {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
 	var got struct {
-		Profiles []struct {
-			Profile  string         `json:"profile"`
-			Provider map[string]any `json:"provider"`
-			Tracker  map[string]any `json:"tracker"`
-		} `json:"profiles"`
+		Profiles []map[string]any `json:"profiles"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("stdout isn't JSON: %v\n%s", err, stdout)
 	}
-	if len(got.Profiles) != 1 || got.Profiles[0].Profile != "work" {
+	if len(got.Profiles) != 2 || got.Profiles[0]["profile"] != "personal" || got.Profiles[1]["profile"] != "work" || len(got.Profiles[0]) != 2 {
 		t.Fatalf("profiles: %s", stdout)
 	}
-	provider, tracker := got.Profiles[0].Provider, got.Profiles[0].Tracker
-	if provider["ok"] != true || provider["error"] != nil || provider["user"].(map[string]any)["username"] != "someone" {
-		t.Errorf("provider: %v", provider)
+	passed, failed := got.Profiles[0]["provider"].(map[string]any), got.Profiles[1]["provider"].(map[string]any)
+	if passed["ok"] != true || passed["error"] != nil || passed["user"].(map[string]any)["username"] != "someone" {
+		t.Errorf("passing check: %v", passed)
 	}
-	trackerErr, _ := tracker["error"].(map[string]any)
-	if tracker["ok"] != false || tracker["user"] != nil || trackerErr["code"] != "auth_invalid" || trackerErr["scope"] != "work" {
-		t.Errorf("tracker: %v", tracker)
+	failedErr, _ := failed["error"].(map[string]any)
+	if failed["ok"] != false || failed["user"] != nil || failedErr["code"] != "auth_invalid" || failedErr["scope"] != "work" {
+		t.Errorf("failing check: %v", failed)
 	}
 }
 
 func TestAuthTestMissingToken(t *testing.T) {
 	authConfig(t)
 	t.Setenv("ALPR_TEST_GITHUB", "")
-	t.Setenv("ALPR_TEST_JIRA", "good-jira")
 
 	code, stdout, _ := runArgs("auth", "test", "--profile", "personal")
 	if code != 3 || !strings.Contains(stdout, "failed: environment variable ALPR_TEST_GITHUB is not set or empty") {
@@ -155,7 +133,6 @@ func TestAuthSetRejects(t *testing.T) {
 		wantMsg string
 	}{
 		{"env reference", []string{"auth", "set", "personal"}, "comes from env:ALPR_TEST_GITHUB"},
-		{"github-issues tracker", []string{"auth", "set", "personal", "--tracker"}, "has no tracker with its own token"},
 		{"unknown profile", []string{"auth", "set", "nope"}, `no profile named "nope"`},
 		{"missing profile argument", []string{"auth", "set"}, "accepts 1 arg(s), received 0"},
 	}

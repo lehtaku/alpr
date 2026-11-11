@@ -4,7 +4,6 @@ package transport
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +25,7 @@ const (
 // Client sends requests to one API host.
 type Client struct {
 	BaseURL       string            // API root, e.g. https://api.github.com
-	Authorization string            // Authorization header value, from BearerAuth or BasicAuth
+	Authorization string            // Authorization header value, from BearerAuth
 	Headers       map[string]string // extra headers sent with every request
 	HTTP          *http.Client      // nil means a client with a 30-second timeout
 }
@@ -34,11 +33,6 @@ type Client struct {
 // BearerAuth returns an Authorization header value for a bearer token.
 func BearerAuth(token string) string {
 	return "Bearer " + token
-}
-
-// BasicAuth returns an Authorization header value for Basic auth.
-func BasicAuth(username, token string) string {
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+token))
 }
 
 // Do sends a request and returns the response headers. A non-nil body is sent as JSON, and a JSON response is
@@ -158,7 +152,7 @@ func rateLimit(resp *http.Response) (int, bool) {
 	return -1, resp.StatusCode == http.StatusTooManyRequests
 }
 
-// apiMessage extracts the error text from GitHub, Bitbucket or Jira error bodies.
+// apiMessage extracts the error text from GitHub or Bitbucket error bodies.
 func apiMessage(body []byte) string {
 	var fields map[string]any
 	if json.Unmarshal(body, &fields) != nil {
@@ -174,11 +168,6 @@ func apiMessage(body []byte) string {
 		}
 	case string:
 		return errField
-	}
-	if msgs, ok := fields["errorMessages"].([]any); ok && len(msgs) > 0 { // Jira
-		if msg, ok := msgs[0].(string); ok {
-			return msg
-		}
 	}
 	return ""
 }

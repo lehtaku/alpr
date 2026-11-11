@@ -51,7 +51,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 func newRootCommand(flags *globalFlags) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "alpr",
-		Short:         "Routine code-review work across Git hosts and ticket trackers",
+		Short:         "Routine code-review work on pull requests across Git hosts",
 		Version:       version(),
 		SilenceUsage:  true,
 		SilenceErrors: true,

@@ -16,20 +16,11 @@ provider = "bitbucket-cloud"
 match    = ["bitbucket.org/example-workspace/*"]
 token    = "keychain:alpr/work"
 
-[profiles.work.tracker]
-type     = "jira"
-base_url = "https://example.atlassian.net"
-username = "you@example.com"
-token    = "keychain:alpr/work-jira"
-
 [profiles.personal]
 provider = "github"
 match    = ["github.com/example-owner/*"]
 token    = "env:GITHUB_TOKEN"
 base_url = "https://github.example.com/api/v3"
-
-[profiles.personal.tracker]
-type = "github-issues"
 `
 
 func writeConfig(t *testing.T, content string) string {
@@ -60,11 +51,8 @@ func TestLoadValid(t *testing.T) {
 	if work.Name != "work" || work.Provider != ProviderBitbucketCloud || work.Token != "keychain:alpr/work" {
 		t.Errorf("work profile: %+v", work)
 	}
-	if tr := work.Tracker; tr == nil || tr.Type != TrackerJira || tr.Username != "you@example.com" || tr.BaseURL != "https://example.atlassian.net" {
-		t.Errorf("work tracker: %+v", tr)
-	}
 	personal := cfg.Profiles["personal"]
-	if personal.Name != "personal" || personal.BaseURL != "https://github.example.com/api/v3" || personal.Tracker.Type != TrackerGitHubIssues {
+	if personal.Name != "personal" || personal.BaseURL != "https://github.example.com/api/v3" {
 		t.Errorf("personal profile: %+v", personal)
 	}
 }
@@ -91,12 +79,8 @@ func TestLoadInvalid(t *testing.T) {
 		{"malformed pattern", strings.Replace(github, "github.com/o/*", "github.com/[o/*", 1), "syntax error in pattern"},
 		{"no token", strings.Replace(github, "token = \"env:T\"\n", "", 1), "token is required"},
 		{"raw token", strings.Replace(github, "env:T", "ghp_pastedToken", 1), "token must be a reference"},
-		{"raw jira token", github + "[profiles.p.tracker]\ntype = \"jira\"\nbase_url = \"https://x.atlassian.net\"\nusername = \"u@example.com\"\ntoken = \"pastedToken\"\n", "tracker token must be a reference"},
 		{"bad base_url", github + "base_url = \"api.github.com\"\n", "base_url must be an http(s) URL"},
-		{"bad tracker type", github + "[profiles.p.tracker]\ntype = \"linear\"\n", "tracker.type must be"},
-		{"jira without username", github + "[profiles.p.tracker]\ntype = \"jira\"\nbase_url = \"https://x.atlassian.net\"\ntoken = \"env:J\"\n", "needs base_url, username and token"},
-		{"github-issues with token", github + "[profiles.p.tracker]\ntype = \"github-issues\"\ntoken = \"env:X\"\n", "takes no base_url"},
-		{"github-issues on bitbucket", strings.Replace(github, `"github"`, `"bitbucket-cloud"`, 1) + "[profiles.p.tracker]\ntype = \"github-issues\"\n", "needs provider"},
+		{"tracker table", github + "[profiles.p.tracker]\ntype = \"jira\"\n", "unknown keys: profiles.p.tracker"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -21,8 +21,6 @@ import (
 const (
 	ProviderBitbucketCloud = "bitbucket-cloud"
 	ProviderGitHub         = "github"
-	TrackerJira            = "jira"
-	TrackerGitHubIssues    = "github-issues"
 )
 
 // Config is a parsed and validated config.toml.
@@ -30,22 +28,13 @@ type Config struct {
 	Profiles map[string]*Profile `toml:"profiles"`
 }
 
-// Profile ties a set of repositories to a provider, its token and an optional tracker.
+// Profile ties a set of repositories to a provider and its token.
 type Profile struct {
 	Name     string   `toml:"-"`
 	Provider string   `toml:"provider"`
 	Match    []string `toml:"match"`
 	Token    string   `toml:"token"`
 	BaseURL  string   `toml:"base_url"`
-	Tracker  *Tracker `toml:"tracker"`
-}
-
-// Tracker is a profile's ticket tracker.
-type Tracker struct {
-	Type     string `toml:"type"`
-	BaseURL  string `toml:"base_url"`
-	Username string `toml:"username"`
-	Token    string `toml:"token"`
 }
 
 var profileName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -119,37 +108,9 @@ func (p *Profile) validate() error {
 		return err
 	}
 	if p.BaseURL != "" {
-		if err := validateURL("base_url", p.BaseURL); err != nil {
-			return err
-		}
+		return validateURL("base_url", p.BaseURL)
 	}
-	if p.Tracker == nil {
-		return nil
-	}
-	if p.Tracker.Type == TrackerGitHubIssues && p.Provider != ProviderGitHub {
-		return fmt.Errorf("a %q tracker needs provider %q", TrackerGitHubIssues, ProviderGitHub)
-	}
-	return p.Tracker.validate()
-}
-
-func (t *Tracker) validate() error {
-	switch t.Type {
-	case TrackerJira:
-		if t.BaseURL == "" || t.Username == "" || t.Token == "" {
-			return errors.New("a jira tracker needs base_url, username and token")
-		}
-		if _, err := credentials.ParseReference(t.Token); err != nil {
-			return fmt.Errorf("tracker %v", err)
-		}
-		return validateURL("tracker.base_url", t.BaseURL)
-	case TrackerGitHubIssues:
-		if t.BaseURL != "" || t.Username != "" || t.Token != "" {
-			return errors.New("a github-issues tracker takes no base_url, username or token; it uses the profile's token")
-		}
-		return nil
-	default:
-		return fmt.Errorf("tracker.type must be %q or %q", TrackerJira, TrackerGitHubIssues)
-	}
+	return nil
 }
 
 func validatePattern(pattern string) error {

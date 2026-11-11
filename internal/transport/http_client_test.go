@@ -78,12 +78,6 @@ func TestDoPostBody(t *testing.T) {
 	}
 }
 
-func TestBasicAuth(t *testing.T) {
-	if got := BasicAuth("you@example.com", "token"); got != "Basic eW91QGV4YW1wbGUuY29tOnRva2Vu" {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestDoStatusErrors(t *testing.T) {
 	reset := strconv.FormatInt(time.Now().Add(90*time.Second).Unix(), 10)
 	tests := []struct {
@@ -97,7 +91,7 @@ func TestDoStatusErrors(t *testing.T) {
 	}{
 		{"unauthorized", 401, nil, `{"message": "Bad credentials"}`, domain.CodeAuthInvalid, "HTTP 401 Unauthorized: Bad credentials", nil},
 		{"forbidden", 403, nil, `{"type": "error", "error": {"message": "Your credentials lack scopes"}}`, domain.CodePermissionDenied, "lack scopes", nil},
-		{"not found", 404, nil, `{"errorMessages": ["Issue does not exist"], "errors": {}}`, domain.CodeNotFound, "Issue does not exist", nil},
+		{"not found", 404, nil, `{"type": "error", "error": {"message": "Resource not found"}}`, domain.CodeNotFound, "Resource not found", nil},
 		{"unprocessable", 422, nil, `{"message": "Validation Failed", "errors": [{"code": "invalid"}]}`, domain.CodeAPIError, "Validation Failed", nil},
 		{"server error with HTML", 502, nil, `<html>Bad Gateway</html>`, domain.CodeAPIError, "HTTP 502 Bad Gateway", nil},
 		{"429 with Retry-After", 429, map[string]string{"Retry-After": "30"}, ``, domain.CodeRateLimited, "HTTP 429", 30},
