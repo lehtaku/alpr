@@ -59,13 +59,15 @@ Create a classic API token at the same Atlassian page with **Create API token** 
 
 Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with access to the repositories you review, and these repository permissions:
 
-- **Pull requests:** read and write
-- **Issues:** read and write
-- **Metadata:** read (added automatically)
+| Permission | Used by |
+|---|---|
+| Metadata: read (added automatically) | every command |
+| Pull requests: read and write | `pr show`; later `pr list`, `pr comment` and `pr unblock` (write is needed for commenting and dismissing your review) |
+| Issues: read and write | later `ticket show` and `ticket comment` with a `github-issues` tracker |
+
+`auth test` works with any valid token. For the commands that work today, the first two are enough; `pr show` reads conversation comments without the Issues permission.
 
 A fine-grained token covers the repositories of one owner. For repositories of several owners, use one profile per owner, or a classic token with the `repo` scope.
-
-> TODO: confirm the minimum GitHub permissions when the GitHub commands are implemented. `auth test` works with any valid token.
 
 ## Configuration
 
