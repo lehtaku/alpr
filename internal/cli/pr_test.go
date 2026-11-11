@@ -11,7 +11,7 @@ import (
 )
 
 // prConfig serves Bitbucket pull request 42 of ws/repo with one inline thread, and writes a config with a
-// Bitbucket profile for ws/* and a GitHub profile for github.com/someone/*.
+// Bitbucket profile for ws/*.
 func prConfig(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,14 +49,8 @@ provider = "bitbucket-cloud"
 base_url = "`+server.URL+`/2.0"
 match    = ["bitbucket.org/ws/*"]
 token    = "env:ALPR_TEST_BITBUCKET"
-
-[profiles.personal]
-provider = "github"
-match    = ["github.com/someone/*"]
-token    = "env:ALPR_TEST_GITHUB"
 `)
 	t.Setenv("ALPR_TEST_BITBUCKET", "good-bitbucket")
-	t.Setenv("ALPR_TEST_GITHUB", "unused")
 }
 
 func TestPRShowText(t *testing.T) {
@@ -141,7 +135,6 @@ func TestPRShowErrors(t *testing.T) {
 		{"bad --repo", []string{"pr", "show", "42", "--repo", "ws/repo"}, 2, "is not of the form host/owner/repo"},
 		{"no matching profile", []string{"pr", "show", "42", "--repo", "bitbucket.org/other/repo"}, 2, "no profile matches"},
 		{"unknown pull request", []string{"pr", "show", "7", "--repo", "bitbucket.org/ws/repo"}, 4, "Resource not found"},
-		{"github", []string{"pr", "show", "42", "--repo", "github.com/someone/repo"}, 6, "doesn't support GitHub yet"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/lehtaku/alpr/internal/domain"
 )
@@ -25,11 +26,27 @@ func (p *Provider) CurrentUser(ctx context.Context) (domain.User, error) {
 	return mapUser(user), nil
 }
 
-// PullRequest isn't implemented for GitHub yet.
-func (p *Provider) PullRequest(context.Context, string, string, string) (domain.PullRequest, error) {
-	return domain.PullRequest{}, &domain.Error{
-		Code:    domain.CodeUnsupported,
-		Message: "pr show doesn't support GitHub yet",
-		Details: map[string]any{"capability": "pr_show", "platform": "github"},
+// PullRequest returns pull request id of owner/repo with its reviewers and comment threads.
+func (p *Provider) PullRequest(ctx context.Context, owner, repo, id string) (domain.PullRequest, error) {
+	number, err := strconv.Atoi(id)
+	if err != nil {
+		return domain.PullRequest{}, domain.Errorf(domain.CodeUsage, "%q is not a pull request number", id)
 	}
+	pr, err := p.client.pullRequest(ctx, owner, repo, number)
+	if err != nil {
+		return domain.PullRequest{}, err
+	}
+	reviews, err := p.client.reviews(ctx, owner, repo, number)
+	if err != nil {
+		return domain.PullRequest{}, err
+	}
+	comments, err := p.client.issueComments(ctx, owner, repo, number)
+	if err != nil {
+		return domain.PullRequest{}, err
+	}
+	threads, err := p.client.reviewThreads(ctx, owner, repo, number)
+	if err != nil {
+		return domain.PullRequest{}, err
+	}
+	return mapPullRequest(pr, reviews, comments, threads), nil
 }

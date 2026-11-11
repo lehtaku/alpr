@@ -4,7 +4,7 @@ A command-line tool for routine code-review work across Git hosting platforms an
 
 Supported platforms: Bitbucket Cloud and GitHub for pull requests; Jira Cloud and GitHub Issues for tickets.
 
-**Status:** early development. Working so far: `auth set`, `auth test`, and `pr show` on Bitbucket Cloud. The planned interface is in [docs/spec.md](docs/spec.md); see [Not implemented yet](#not-implemented-yet).
+**Status:** early development. Working so far: `auth set`, `auth test`, and `pr show`. The planned interface is in [docs/spec.md](docs/spec.md); see [Not implemented yet](#not-implemented-yet).
 
 ## Install
 
@@ -160,6 +160,7 @@ Shows a pull request: title, URL, state, author, branches, reviewers and their s
 ```sh
 alpr pr show 42                                   # inside a clone of the repository
 alpr pr show 42 --repo bitbucket.org/<workspace>/<repo>
+alpr pr show 42 --repo github.com/<owner>/<repo>
 alpr pr show 42 --json
 ```
 
@@ -184,14 +185,12 @@ src/a.go:10-12 (new side), unresolved
 - Times are UTC. "new side" is the pull request's version of the file, "old side" the target branch's.
 - Deleted comments and your unpublished draft comments aren't shown.
 - On Bitbucket, `head_commit` is an abbreviated hash and `outdated` is always `null`.
-
-> TODO: `pr show` on GitHub (exits with `unsupported` for now).
+- On GitHub, people are shown by login. Conversation comments and review summaries are general threads that can't be resolved (`resolved` is `null`), and an outdated review thread may have no current `line`. Deleted accounts appear as `ghost`.
 
 ### Not implemented yet
 
 These are specified in [docs/spec.md](docs/spec.md) §5 and will be documented here as they land:
 
-- [ ] `pr show` on GitHub
 - [ ] `pr list [--reviewer <user>] [--all-repos] [--limit <n>]`: open pull requests, optionally only where you're a reviewer
 - [ ] `sync`: copy your review queue into a local SQLite database
 - [ ] `ticket show <key>`: Jira or GitHub Issues ticket with comments
