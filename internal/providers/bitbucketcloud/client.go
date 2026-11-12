@@ -126,6 +126,28 @@ func (c *client) pullRequest(ctx context.Context, workspace, slug, id string) (a
 	return pr, err
 }
 
+// repositorySlugs returns the slug of every repository in the workspace that the token can read.
+func (c *client) repositorySlugs(ctx context.Context, workspace string) ([]string, error) {
+	var slugs []string
+	path := fmt.Sprintf("repositories/%s?pagelen=100&fields=next,values.slug", url.PathEscape(workspace))
+	err := transport.Pages(path, func(path string) (string, error) {
+		var page struct {
+			Values []struct {
+				Slug string `json:"slug"`
+			} `json:"values"`
+			Next string `json:"next"`
+		}
+		if _, err := c.http.Do(ctx, http.MethodGet, path, nil, &page); err != nil {
+			return "", err
+		}
+		for _, repo := range page.Values {
+			slugs = append(slugs, repo.Slug)
+		}
+		return page.Next, nil
+	})
+	return slugs, err
+}
+
 // maxPageLen is the largest page size the pull request listing accepts.
 const maxPageLen = 50
 

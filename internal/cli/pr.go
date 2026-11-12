@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lehtaku/alpr/internal/config"
 	"github.com/lehtaku/alpr/internal/domain"
 	"github.com/lehtaku/alpr/internal/gitinfo"
 	"github.com/lehtaku/alpr/internal/services"
@@ -22,6 +23,7 @@ func newPRCommand(flags *globalFlags) *cobra.Command {
 func newPRListCommand(flags *globalFlags) *cobra.Command {
 	var reviewer string
 	var limit int
+	var allRepos bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List open pull requests, most recently updated first",
@@ -31,23 +33,53 @@ func newPRListCommand(flags *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			repo, err := currentRepo(flags)
+			var list services.PullRequestList
+			if allRepos {
+				list, err = listAllRepos(cmd, cfg, flags, reviewer, limit)
+			} else {
+				list, err = listRepo(cmd, cfg, flags, reviewer, limit)
+			}
 			if err != nil {
 				return err
 			}
-			list, err := services.ListPullRequests(cmd.Context(), cfg, flags.profile, repo, reviewer, limit)
-			if err != nil {
-				return err
-			}
+
 			if flags.json {
-				return writeJSON(cmd.OutOrStdout(), list)
+				err = writeJSON(cmd.OutOrStdout(), list)
+			} else {
+				err = writePullRequestList(cmd.OutOrStdout(), list.PullRequests)
+				for _, item := range list.Errors {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "alpr: %s: %s\n", item.Scope, item.Message)
+				}
 			}
-			return writePullRequestList(cmd.OutOrStdout(), list.PullRequests)
+			if err != nil || len(list.Errors) == 0 {
+				return err
+			}
+			return exitStatus(list.Errors[0].Code.ExitCode())
 		},
 	}
 	cmd.Flags().StringVar(&reviewer, "reviewer", "", "only pull requests this user is asked to review or has reviewed: @me, a GitHub login or a Bitbucket account UUID")
 	cmd.Flags().IntVar(&limit, "limit", 50, "the most pull requests to list")
+	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "every repository the profiles' match patterns cover (all profiles unless --profile)")
 	return cmd
+}
+
+func listRepo(cmd *cobra.Command, cfg *config.Config, flags *globalFlags, reviewer string, limit int) (services.PullRequestList, error) {
+	repo, err := currentRepo(flags)
+	if err != nil {
+		return services.PullRequestList{}, err
+	}
+	return services.ListPullRequests(cmd.Context(), cfg, flags.profile, repo, reviewer, limit)
+}
+
+func listAllRepos(cmd *cobra.Command, cfg *config.Config, flags *globalFlags, reviewer string, limit int) (services.PullRequestList, error) {
+	if flags.repo != "" {
+		return services.PullRequestList{}, domain.Errorf(domain.CodeUsage, "--all-repos and --repo can't be combined")
+	}
+	profiles, err := selectedOrAll(cfg, flags.profile)
+	if err != nil {
+		return services.PullRequestList{}, err
+	}
+	return services.ListAllPullRequests(cmd.Context(), profiles, reviewer, limit)
 }
 
 func newPRShowCommand(flags *globalFlags) *cobra.Command {

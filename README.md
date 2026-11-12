@@ -4,7 +4,7 @@ A command-line tool for routine code-review work on pull requests across Git hos
 
 Supported platforms: Bitbucket Cloud and GitHub.
 
-**Status:** early development. Working so far: `auth set`, `auth test`, `pr show` and `pr list` (without `--all-repos`). The planned interface is in [docs/spec.md](docs/spec.md); see [Not implemented yet](#not-implemented-yet).
+**Status:** early development. Working so far: `auth set`, `auth test`, `pr show` and `pr list`. The planned interface is in [docs/spec.md](docs/spec.md); see [Not implemented yet](#not-implemented-yet).
 
 ## Install
 
@@ -47,9 +47,9 @@ Create an API token with scopes at [Atlassian account → Security → API token
 | `read:user:bitbucket` | `auth test`, and `@me` in later commands |
 | `read:pullrequest:bitbucket` | `pr show`, `pr list`; later `pr comment` and the diff-line check |
 | `write:pullrequest:bitbucket` | later `pr unblock` (removing your change request) |
-| `read:repository:bitbucket` | later `pr list --all-repos` (listing a workspace's repositories) |
+| `read:repository:bitbucket` | `pr list --all-repos` (listing a workspace's repositories) |
 
-The scopes per endpoint come from Bitbucket's OpenAPI description. For the commands that work today, the first two are enough.
+The scopes per endpoint come from Bitbucket's OpenAPI description. For the commands that work today, the first two and `read:repository:bitbucket` are enough.
 
 ### GitHub
 
@@ -91,7 +91,7 @@ token    = "env:GITHUB_TOKEN"
 - alpr picks the profile whose `match` patterns cover the repository (`--repo`, or the `origin` remote of the current directory), or the one named with `--profile`. No match, or more than one, is an error.
 - Patterns match the host as written in the remote. If you use an SSH host alias (`git@bitbucket-work:<workspace>/<repo>.git`), add a pattern with that alias, e.g. `bitbucket-work/<workspace>/*`, or pass `--repo`.
 - Tokens are never stored in the file: `keychain:<service>/<account>` reads the macOS Keychain, and `env:<NAME>` reads an environment variable.
-- Bitbucket has no workspace-wide "pull requests I'm reviewing" query, so alpr will check each repository a pattern covers. Prefer narrow patterns, such as `bitbucket.org/<workspace>/<repo>` or `bitbucket.org/<workspace>/team-*`.
+- Bitbucket has no workspace-wide "pull requests I'm reviewing" query, so `pr list --all-repos` checks each repository a pattern covers. Prefer narrow patterns, such as `bitbucket.org/<workspace>/<repo>` or `bitbucket.org/<workspace>/team-*`.
 
 The full reference is in [docs/spec.md](docs/spec.md) §7–8.
 
@@ -174,12 +174,13 @@ src/a.go:10-12 (new side), unresolved
 
 ### `alpr pr list`
 
-Lists open pull requests in the repository, most recently updated first.
+Lists open pull requests in the repository, or with `--all-repos` in every repository your profiles cover, most recently updated first.
 
 ```sh
 alpr pr list                        # inside a clone of the repository
 alpr pr list --reviewer @me         # only the ones you're reviewing
-alpr pr list --reviewer <login> --limit 10 --json
+alpr pr list --all-repos --reviewer @me                # your review queue across all profiles
+alpr pr list --all-repos --profile work --limit 10 --json
 ```
 
 ```
@@ -192,15 +193,17 @@ bitbucket.org/<ws>/<repo>  42  Add parser          Your Name    2026-10-31T09:15
 |---|---|
 | `--reviewer <user>` | only pull requests this user is reviewing: `@me`, a GitHub login, or a Bitbucket account UUID (`{…}`, shown as `id` by `alpr auth test --json`) |
 | `--limit <n>` | at most n pull requests (default 50) |
+| `--all-repos` | every repository the `match` patterns cover, for all profiles or only `--profile`; can't be combined with `--repo` |
 
 - On GitHub, `--reviewer` matches pull requests where the user is requested (directly or through a team) or has already submitted a review. New pull requests can take a few seconds to show up in GitHub's search.
 - On Bitbucket, `--reviewer` matches only pull requests where the user is a requested reviewer. Bitbucket can't search by participant, so a pull request you approved or commented on without being added as a reviewer isn't listed.
+- `--all-repos` on GitHub runs one search per `match` pattern. On Bitbucket it lists the workspace's repositories and queries each matching one, 8 at a time: a pattern such as `bitbucket.org/<workspace>/*` costs one request per repository in the workspace, so narrow patterns are faster. Patterns with a wildcard in the owner (`github.com/*/repo`) can't be listed.
+- If some repositories or profiles fail, the others are still listed. Each failure is printed to stderr as `alpr: <repository or profile>: <message>` (or listed in `errors` with `--json`), and the exit code is that of the first failure.
 
 ### Not implemented yet
 
 These are specified in [docs/spec.md](docs/spec.md) §5 and will be documented here as they land:
 
-- [ ] `pr list --all-repos`: open pull requests across every repository your profiles cover
 - [ ] `pr comment <id>`: inline or general comment, with `--dry-run`
 - [ ] `pr unblock <id>`: clear your "changes requested" status once your comments are handled
 

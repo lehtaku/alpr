@@ -371,3 +371,63 @@ func TestMapSearchPullRequestState(t *testing.T) {
 		}
 	}
 }
+
+func TestPullRequestsIn(t *testing.T) {
+	tests := []struct {
+		name, pattern, wantQuery string
+		wantIDs                  string
+	}{
+		{"one repository", "r", "repo:o/r is:pr is:open sort:updated-desc", "1 2"},
+		{"every repository", "*", "user:o is:pr is:open sort:updated-desc", "1 2"},
+		{"partial pattern", "team-*", "user:o is:pr is:open sort:updated-desc", "3 4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					Variables map[string]any `json:"variables"`
+				}
+				if json.NewDecoder(r.Body).Decode(&req) != nil || req.Variables["query"] != tt.wantQuery {
+					http.Error(w, "unexpected request", http.StatusTeapot)
+					return
+				}
+				node := func(number int, repo string) string {
+					return strings.Replace(searchNode(number, "OPEN", false, "2026-10-31T09:00:00Z"), `"o/r"`, `"o/`+repo+`"`, 1)
+				}
+				switch req.Variables["cursor"] {
+				case nil:
+					_, _ = w.Write([]byte(`{"data": {"search": {"pageInfo": {"hasNextPage": true, "endCursor": "S1"}, "nodes": [` +
+						node(1, "api") + `,` + node(2, "web") + `]}}}`))
+				case "S1":
+					_, _ = w.Write([]byte(`{"data": {"search": {"pageInfo": {"hasNextPage": true, "endCursor": "S2"}, "nodes": [` +
+						node(3, "Team-A") + `,` + node(4, "team-b") + `,` + node(5, "team-c") + `]}}}`))
+				default:
+					http.Error(w, "unexpected page", http.StatusTeapot)
+				}
+			}))
+			defer server.Close()
+
+			prs, items, err := New(server.URL, "secret").PullRequestsIn(context.Background(), "o", tt.pattern, "", 2)
+			if err != nil || len(items) != 0 {
+				t.Fatalf("items %+v, error %v", items, err)
+			}
+			var ids []string
+			for _, pr := range prs {
+				ids = append(ids, pr.ID)
+			}
+			if got := strings.Join(ids, " "); got != tt.wantIDs {
+				t.Errorf("ids %s, want %s", got, tt.wantIDs)
+			}
+		})
+	}
+}
+
+func TestPullRequestsInRejectsNames(t *testing.T) {
+	for _, tt := range []struct{ owner, pattern string }{{"o is:closed", "*"}, {"o", "r is:closed"}} {
+		_, _, err := New("http://127.0.0.1:1", "secret").PullRequestsIn(context.Background(), tt.owner, tt.pattern, "", 50)
+		var domainErr *domain.Error
+		if !errors.As(err, &domainErr) || domainErr.Code != domain.CodeConfigInvalid {
+			t.Errorf("%s/%s: error %v", tt.owner, tt.pattern, err)
+		}
+	}
+}

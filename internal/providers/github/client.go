@@ -248,7 +248,8 @@ func (c *client) issueComments(ctx context.Context, owner, repo string, number i
 }
 
 // searchPullRequests returns at most limit pull requests matching a search query, in the order the query sorts them.
-func (c *client) searchPullRequests(ctx context.Context, query string, limit int) ([]apiSearchPullRequest, error) {
+// A non-nil keep drops the results it rejects, and the search continues until limit results are kept.
+func (c *client) searchPullRequests(ctx context.Context, query string, limit int, keep func(apiSearchPullRequest) bool) ([]apiSearchPullRequest, error) {
 	var prs []apiSearchPullRequest
 	err := transport.Pages("", func(cursor string) (string, error) {
 		var data struct {
@@ -257,11 +258,19 @@ func (c *client) searchPullRequests(ctx context.Context, query string, limit int
 				Nodes    []apiSearchPullRequest `json:"nodes"`
 			} `json:"search"`
 		}
-		variables := map[string]any{"query": query, "first": min(limit-len(prs), maxSearchPage), "cursor": nullable(cursor)}
+		first := maxSearchPage
+		if keep == nil {
+			first = min(limit-len(prs), maxSearchPage)
+		}
+		variables := map[string]any{"query": query, "first": first, "cursor": nullable(cursor)}
 		if err := c.graphql(ctx, searchPullRequestsQuery, variables, &data); err != nil {
 			return "", err
 		}
-		prs = append(prs, data.Search.Nodes...)
+		for _, pr := range data.Search.Nodes {
+			if keep == nil || keep(pr) {
+				prs = append(prs, pr)
+			}
+		}
 		if len(prs) >= limit {
 			return "", nil
 		}

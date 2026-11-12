@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/lehtaku/alpr/internal/domain"
@@ -223,6 +225,79 @@ func TestPullRequestsRejectsReviewer(t *testing.T) {
 	_, err := New("http://127.0.0.1:1", "secret").PullRequests(context.Background(), "ws", "repo", `x" OR state = "MERGED`, 50)
 	var domainErr *domain.Error
 	if !errors.As(err, &domainErr) || domainErr.Code != domain.CodeUsage || !strings.Contains(domainErr.Message, "account UUID") {
+		t.Errorf("error %v", err)
+	}
+}
+
+func TestPullRequestsIn(t *testing.T) {
+	var listed []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case path == "/2.0/repositories/ws" && r.URL.Query().Get("fields") == "next,values.slug":
+			_, _ = w.Write([]byte(`{"values": [{"slug": "api"}, {"slug": "Team-A"}, {"slug": "team-b"}, {"slug": "team-c"}]}`))
+		case strings.HasSuffix(path, "/pullrequests"):
+			mu.Lock()
+			listed = append(listed, path)
+			mu.Unlock()
+			switch path {
+			case "/2.0/repositories/ws/Team-A/pullrequests":
+				_, _ = w.Write([]byte(`{"values": [` + listedPullRequestJSON(1, "2026-10-31T09:00:00+00:00") + `]}`))
+			case "/2.0/repositories/ws/team-b/pullrequests":
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"type": "error", "error": {"message": "Access denied"}}`))
+			default:
+				_, _ = w.Write([]byte(`{"values": []}`))
+			}
+		default:
+			http.Error(w, "unexpected request", http.StatusTeapot)
+		}
+	}))
+	defer server.Close()
+
+	prs, items, err := New(server.URL+"/2.0", "secret").PullRequestsIn(context.Background(), "ws", "team-*", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(listed)
+	if got := strings.Join(listed, " "); got != "/2.0/repositories/ws/Team-A/pullrequests /2.0/repositories/ws/team-b/pullrequests /2.0/repositories/ws/team-c/pullrequests" {
+		t.Errorf("listed %s", got)
+	}
+	if len(prs) != 1 || prs[0].ID != "1" {
+		t.Errorf("pull requests %+v", prs)
+	}
+	if len(items) != 1 || items[0].Scope != "bitbucket.org/ws/team-b" || items[0].Code != domain.CodePermissionDenied {
+		t.Errorf("error items %+v", items)
+	}
+}
+
+func TestPullRequestsInSingleRepository(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/2.0/repositories/ws/api/pullrequests" {
+			http.Error(w, "unexpected request", http.StatusTeapot)
+			return
+		}
+		_, _ = w.Write([]byte(`{"values": [` + listedPullRequestJSON(7, "2026-10-31T09:00:00+00:00") + `]}`))
+	}))
+	defer server.Close()
+
+	prs, items, err := New(server.URL+"/2.0", "secret").PullRequestsIn(context.Background(), "ws", "api", "", 50)
+	if err != nil || len(items) != 0 || len(prs) != 1 || prs[0].ID != "7" {
+		t.Errorf("pull requests %+v, items %+v, error %v", prs, items, err)
+	}
+}
+
+func TestPullRequestsInListingFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"type": "error", "error": {"message": "Workspace not found"}}`))
+	}))
+	defer server.Close()
+
+	_, _, err := New(server.URL+"/2.0", "secret").PullRequestsIn(context.Background(), "nope", "*", "", 50)
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != domain.CodeNotFound {
 		t.Errorf("error %v", err)
 	}
 }

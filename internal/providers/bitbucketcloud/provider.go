@@ -3,11 +3,16 @@ package bitbucketcloud
 import (
 	"context"
 	"regexp"
+	"slices"
+	"sync"
 
 	"github.com/lehtaku/alpr/internal/domain"
 )
 
 var accountUUID = regexp.MustCompile(`^\{[0-9A-Fa-f-]+\}$`)
+
+// maxParallel caps the repository listings PullRequestsIn runs at once.
+const maxParallel = 8
 
 // Provider implements providers.PrProvider for Bitbucket Cloud.
 type Provider struct {
@@ -45,14 +50,55 @@ func (p *Provider) PullRequest(ctx context.Context, workspace, slug, id string) 
 // ("@me" or an account UUID) keeps those where the user is a requested reviewer; Bitbucket can't filter on
 // participants, so pull requests the user reviewed without being requested are left out.
 func (p *Provider) PullRequests(ctx context.Context, workspace, slug, reviewer string, limit int) ([]domain.PullRequestSummary, error) {
-	reviewerUUID := ""
-	if reviewer != "" {
-		uuid, err := p.accountUUID(ctx, reviewer)
-		if err != nil {
-			return nil, err
-		}
-		reviewerUUID = uuid
+	reviewerUUID, err := p.reviewerUUID(ctx, reviewer)
+	if err != nil {
+		return nil, err
 	}
+	return p.openPullRequests(ctx, workspace, slug, reviewerUUID, limit)
+}
+
+// PullRequestsIn returns open pull requests, at most limit per repository, across the workspace's repositories whose
+// slugs match repoPattern. It lists the workspace's repositories first, unless repoPattern names a single repository,
+// and then queries maxParallel repositories at a time.
+func (p *Provider) PullRequestsIn(ctx context.Context, workspace, repoPattern, reviewer string, limit int) ([]domain.PullRequestSummary, []domain.ErrorItem, error) {
+	reviewerUUID, err := p.reviewerUUID(ctx, reviewer)
+	if err != nil {
+		return nil, nil, err
+	}
+	slugs := []string{repoPattern}
+	if domain.IsPattern(repoPattern) {
+		all, err := p.client.repositorySlugs(ctx, workspace)
+		if err != nil {
+			return nil, nil, err
+		}
+		slugs = slices.DeleteFunc(all, func(slug string) bool { return !domain.MatchName(repoPattern, slug) })
+	}
+
+	results := make([][]domain.PullRequestSummary, len(slugs))
+	errs := make([]error, len(slugs))
+	running := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+	for i, slug := range slugs {
+		wg.Go(func() {
+			running <- struct{}{}
+			defer func() { <-running }()
+			results[i], errs[i] = p.openPullRequests(ctx, workspace, slug, reviewerUUID, limit)
+		})
+	}
+	wg.Wait()
+
+	summaries := []domain.PullRequestSummary{}
+	items := []domain.ErrorItem{}
+	for i, slug := range slugs {
+		if errs[i] != nil {
+			items = append(items, domain.NewErrorItem(host+"/"+workspace+"/"+slug, errs[i]))
+		}
+		summaries = append(summaries, results[i]...)
+	}
+	return summaries, items, nil
+}
+
+func (p *Provider) openPullRequests(ctx context.Context, workspace, slug, reviewerUUID string, limit int) ([]domain.PullRequestSummary, error) {
 	prs, err := p.client.openPullRequests(ctx, workspace, slug, reviewerUUID, limit)
 	if err != nil {
 		return nil, err
@@ -64,8 +110,12 @@ func (p *Provider) PullRequests(ctx context.Context, workspace, slug, reviewer s
 	return summaries, nil
 }
 
-// accountUUID resolves "@me" to the token's account UUID and checks that anything else is an account UUID.
-func (p *Provider) accountUUID(ctx context.Context, user string) (string, error) {
+// reviewerUUID resolves "@me" to the token's account UUID and checks that anything else is an account UUID; no
+// reviewer gives "".
+func (p *Provider) reviewerUUID(ctx context.Context, user string) (string, error) {
+	if user == "" {
+		return "", nil
+	}
 	if user == "@me" {
 		me, err := p.client.currentUser(ctx)
 		return me.UUID, err

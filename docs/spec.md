@@ -184,12 +184,13 @@ Open pull requests, most recently updated first.
   - GitHub: the user is requested, directly or through a team, or has submitted a review (including a comment-only review).
   - Bitbucket: the user is a requested reviewer. Bitbucket can't filter on participants, so pull requests the user approved or commented on without being requested aren't listed.
 - `--limit <n>`: at most n results; default 50.
-- A failure in one repository or profile doesn't stop the others. It's listed in `errors`, and the exit code is that of the first error.
+- `--all-repos` can't be combined with `--repo`. A `match` pattern with a wildcard in the owner segment can't be listed and is reported in `errors`.
+- A failure in one repository, pattern or profile doesn't stop the others. It's listed in `errors` (text output prints each as `alpr: <scope>: <message>` on stderr), and the exit code is that of the first error.
 
 JSON: `{"pull_requests": [PullRequestSummary], "errors": [ErrorItem]}`
 Text: `REPO  ID  TITLE  AUTHOR  UPDATED`, drafts marked.
 
-Bitbucket has no workspace-wide reviewer query, so `--all-repos` lists each workspace's repositories and queries them one by one (§9, Q3).
+Bitbucket has no workspace-wide reviewer query, so `--all-repos` lists each workspace's repositories and queries the matching ones, 8 at a time (§9, Q3). On GitHub, each pattern is one search: `repo:<owner>/<repo>` for a single repository, otherwise `user:<owner>` (which covers organizations too), with partial patterns such as `team-*` filtered locally.
 
 ### 5.4 `alpr pr show <id>`
 

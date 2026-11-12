@@ -11,7 +11,8 @@ import (
 )
 
 // prConfig serves Bitbucket pull request 42 of ws/repo with one inline thread, a listing of two open pull requests
-// of which the first is a draft, and writes a config with a Bitbucket profile for ws/*.
+// of which the first is a draft, and workspace ws with repositories repo and broken, whose listing fails. It writes
+// a config with a Bitbucket profile for ws/*.
 func prConfig(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +31,8 @@ func prConfig(t *testing.T) {
   "reviewers": [{"uuid": "{ann}", "nickname": "ann", "display_name": "Ann"}, {"uuid": "{bob}", "nickname": "bob", "display_name": "Bob"}],
   "participants": [{"user": {"uuid": "{ann}", "nickname": "ann", "display_name": "Ann"}, "role": "REVIEWER", "approved": true, "state": "approved"}]
 }`))
+		case r.URL.Path == "/2.0/repositories/ws":
+			_, _ = w.Write([]byte(`{"values": [{"slug": "broken"}, {"slug": "repo"}]}`))
 		case r.URL.Path == "/2.0/repositories/ws/repo/pullrequests" && r.URL.Query().Get("q") == `state = "OPEN"`:
 			_, _ = w.Write([]byte(`{"values": [
   {"id": 43, "title": "Draft idea", "state": "OPEN", "draft": true, "author": {"uuid": "{b}", "display_name": "Bob"},
@@ -216,5 +219,41 @@ func TestPRListErrors(t *testing.T) {
 				t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
 			}
 		})
+	}
+}
+
+func TestPRListAllRepos(t *testing.T) {
+	prConfig(t)
+	code, stdout, stderr := runArgs("pr", "list", "--all-repos", "--limit", "1")
+	if code != 4 || !strings.Contains(stdout, "[draft] Draft idea") || strings.Contains(stdout, "Add parser") ||
+		!strings.HasPrefix(stderr, "alpr: bitbucket.org/ws/broken: GET ") || !strings.HasSuffix(stderr, "Resource not found\n") ||
+		strings.Count(stderr, "\n") != 1 {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestPRListAllReposJSON(t *testing.T) {
+	prConfig(t)
+	code, stdout, stderr := runArgs("pr", "list", "--all-repos", "--json")
+	if code != 4 || stderr != "" {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	var got struct {
+		PullRequests []map[string]any    `json:"pull_requests"`
+		Errors       []map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("stdout isn't JSON: %v\n%s", err, stdout)
+	}
+	if len(got.PullRequests) != 2 || len(got.Errors) != 1 || got.Errors[0]["scope"] != "bitbucket.org/ws/broken" || got.Errors[0]["code"] != "not_found" {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+}
+
+func TestPRListAllReposWithRepo(t *testing.T) {
+	prConfig(t)
+	code, stdout, stderr := runArgs("pr", "list", "--all-repos", "--repo", "bitbucket.org/ws/repo")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "--all-repos and --repo can't be combined") {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
