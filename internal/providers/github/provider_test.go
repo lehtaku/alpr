@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -290,6 +291,83 @@ func TestMapState(t *testing.T) {
 	for _, tt := range tests {
 		if got := mapState(tt.state, tt.merged); got != tt.want {
 			t.Errorf("%s, merged %v: %s, want %s", tt.state, tt.merged, got, tt.want)
+		}
+	}
+}
+
+func searchNode(number int, state string, draft bool, updated string) string {
+	return fmt.Sprintf(`{"number": %d, "url": "https://github.com/o/r/pull/%d", "title": "PR %d", "state": %q, "isDraft": %v,
+  "headRefName": "feature/%d", "baseRefName": "main", "headRefOid": "sha%d", "createdAt": "2026-10-30T08:00:00Z", "updatedAt": %q,
+  "author": {"login": "author", "databaseId": 1}, "repository": {"nameWithOwner": "o/r"}}`, number, number, number, state, draft, number, number, updated)
+}
+
+func TestPullRequests(t *testing.T) {
+	tests := []struct {
+		name, reviewer, wantQuery string
+	}{
+		{"all", "", "repo:o/r is:pr is:open sort:updated-desc"},
+		{"@me", "@me", "repo:o/r is:pr is:open sort:updated-desc review-involves:@me"},
+		{"login", "some-one", "repo:o/r is:pr is:open sort:updated-desc review-involves:some-one"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					Query     string         `json:"query"`
+					Variables map[string]any `json:"variables"`
+				}
+				if r.URL.Path != "/graphql" || json.NewDecoder(r.Body).Decode(&req) != nil ||
+					!strings.Contains(req.Query, "search(query: $query, type: ISSUE") || req.Variables["query"] != tt.wantQuery {
+					http.Error(w, "unexpected request", http.StatusTeapot)
+					return
+				}
+				switch vars := req.Variables; {
+				case vars["cursor"] == nil && vars["first"] == float64(3):
+					_, _ = w.Write([]byte(`{"data": {"search": {"pageInfo": {"hasNextPage": true, "endCursor": "S1"}, "nodes": [` +
+						searchNode(1, "OPEN", true, "2026-10-31T09:00:00Z") + `,` + searchNode(2, "OPEN", false, "2026-10-31T08:00:00Z") + `]}}}`))
+				case vars["cursor"] == "S1" && vars["first"] == float64(1):
+					_, _ = w.Write([]byte(`{"data": {"search": {"pageInfo": {"hasNextPage": true, "endCursor": "S2"}, "nodes": [` +
+						searchNode(3, "OPEN", false, "2026-10-31T07:00:00Z") + `]}}}`))
+				default:
+					http.Error(w, "unexpected page", http.StatusTeapot)
+				}
+			}))
+			defer server.Close()
+
+			prs, err := New(server.URL, "secret").PullRequests(context.Background(), "o", "r", tt.reviewer, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, pr := range prs {
+				ids = append(ids, pr.ID)
+			}
+			if got := strings.Join(ids, " "); got != "1 2 3" {
+				t.Fatalf("ids %s", got)
+			}
+			if pr := prs[0]; pr.Repo != "github.com/o/r" || pr.State != domain.PullRequestOpen || !pr.Draft || pr.SourceBranch != "feature/1" ||
+				pr.TargetBranch != "main" || pr.HeadCommit != "sha1" || pr.UpdatedAt != "2026-10-31T09:00:00Z" ||
+				pr.Author.ID != "1" || pr.Author.DisplayName != "author" {
+				t.Errorf("first pull request %+v", pr)
+			}
+		})
+	}
+}
+
+func TestPullRequestsRejectsReviewer(t *testing.T) {
+	_, err := New("http://127.0.0.1:1", "secret").PullRequests(context.Background(), "o", "r", "x repo:other/repo", 50)
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != domain.CodeUsage || !strings.Contains(domainErr.Message, "@me or a login") {
+		t.Errorf("error %v", err)
+	}
+}
+
+func TestMapSearchPullRequestState(t *testing.T) {
+	for state, want := range map[string]domain.PullRequestState{
+		"OPEN": domain.PullRequestOpen, "CLOSED": domain.PullRequestClosed, "MERGED": domain.PullRequestMerged,
+	} {
+		if got := mapSearchPullRequest(apiSearchPullRequest{State: state}).State; got != want {
+			t.Errorf("%s: %s, want %s", state, got, want)
 		}
 	}
 }

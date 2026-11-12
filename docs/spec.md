@@ -180,7 +180,9 @@ Asks each platform who the token belongs to, for all profiles or only `--profile
 Open pull requests, most recently updated first.
 
 - **Scope:** the current repository, or `--repo`. `--all-repos` covers every repository the profile's `match` patterns cover (all profiles unless `--profile` is given).
-- `--reviewer <user>`: only pull requests where the user is a reviewer, whether requested or already reviewed. `<user>` is `@me`, a GitHub login or a Bitbucket account UUID.
+- `--reviewer <user>`: only pull requests the user is reviewing. `<user>` is `@me`, a GitHub login or a Bitbucket account UUID.
+  - GitHub: the user is requested, directly or through a team, or has submitted a review (including a comment-only review).
+  - Bitbucket: the user is a requested reviewer. Bitbucket can't filter on participants, so pull requests the user approved or commented on without being requested aren't listed.
 - `--limit <n>`: at most n results; default 50.
 - A failure in one repository or profile doesn't stop the others. It's listed in `errors`, and the exit code is that of the first error.
 
@@ -332,8 +334,8 @@ Bitbucket paths are relative to `https://api.bitbucket.org/2.0`, with `{pr}` = `
 | Operation | Bitbucket Cloud | GitHub |
 |---|---|---|
 | who am I | `GET /user` | `GET /user` |
-| open PRs in a repo | `GET /repositories/{workspace}/{repo_slug}/pullrequests?state=OPEN`, optionally `q=reviewers.uuid="{uuid}"` | `GET /repos/{owner}/{repo}/pulls?state=open` |
-| my review queue across repos | `GET /repositories/{workspace}`, then the per-repo query; `/workspaces/{workspace}/pullrequests/{user}` only lists PRs the user authored | search with `is:pr is:open review-involves:<login>` |
+| open PRs in a repo | `GET /repositories/{workspace}/{repo_slug}/pullrequests?q=state = "OPEN"&sort=-updated_on`, optionally `AND reviewers.uuid = "{uuid}"` in `q` | GraphQL `search(type: ISSUE)` with `repo:{owner}/{repo} is:pr is:open sort:updated-desc`, optionally `review-involves:<login>` |
+| my review queue across repos | `GET /repositories/{workspace}`, then the per-repo query; `/workspaces/{workspace}/pullrequests/{user}` only lists PRs the user authored | the same search without `repo:`, or with several `repo:` qualifiers |
 | PR and reviewers | `GET {pr}`: `participants` with `role`, `approved` and `state` (`approved`, `changes_requested` or null) | `GET {pr}`, `GET {pr}/reviews`, `GET {pr}/requested_reviewers` |
 | threads | `GET {pr}/comments`: `parent`, `inline` (`path`, `from`, `to`, `start_from`, `start_to`), `resolution`, `deleted`, `pending` | GraphQL `pullRequest.reviewThreads` (`isResolved`, `isOutdated`, `path`, `line`, `startLine`, `diffSide`); `GET /repos/{owner}/{repo}/issues/{number}/comments` |
 | diff for the line check | `GET {pr}/diff` | `GET {pr}/files` (per-file `patch`, at most 3000 files) |
@@ -345,14 +347,16 @@ Bitbucket paths are relative to `https://api.bitbucket.org/2.0`, with `{pr}` = `
 
 - Bitbucket returns `reviewers` and `participants` only when a single pull request is fetched, so reviewer details cost one request per pull request.
 - Bitbucket's activity log includes change requests, but the docs show no example of that entry; its shape is confirmed in phase 4.
-- GitHub's `review-involves:` also matches pull requests where only a team I belong to was requested.
+- Bitbucket ignores the `state` parameter when `q` is given, so the state goes into `q`. `reviewers.uuid` can be filtered on; `participants.uuid` can't (HTTP 400 "does not support filtering"). Both verified 2026-11-11.
+- The pull request listing returns at most 50 per page on Bitbucket and 100 per GraphQL page on GitHub.
+- GitHub's `review-involves:` also matches pull requests where only a team I belong to was requested, and keeps them after the review. GitHub search results can lag a few seconds behind new pull requests.
 
 ### Sources
 
 - Bitbucket Cloud OpenAPI spec: <https://dac-static.atlassian.com/cloud/bitbucket/swagger.v3.json>
 - Bitbucket API tokens: <https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/>, scopes: <https://support.atlassian.com/bitbucket-cloud/docs/api-token-permissions/>
 - App password deprecation: <https://www.atlassian.com/blog/bitbucket/bitbucket-cloud-transitions-to-api-tokens-enhancing-security-with-app-password-deprecation>
-- Bitbucket `q=reviewers.uuid=…` filter (an Atlassian Community answer; not shown in the API reference, so confirm in phase 2): <https://community.atlassian.com/forums/Bitbucket-questions/How-do-I-get-all-the-PRs-I-ve-approved-or-reviewed/qaq-p/1958970>
+- Bitbucket `q=reviewers.uuid=…` filter (an Atlassian Community answer, confirmed against the API on 2026-11-11): <https://community.atlassian.com/forums/Bitbucket-questions/How-do-I-get-all-the-PRs-I-ve-approved-or-reviewed/qaq-p/1958970>
 - GitHub REST OpenAPI description: <https://github.com/github/rest-api-description>
 - GitHub GraphQL schema: <https://docs.github.com/public/fpt/schema.docs.graphql>
 - GitHub review dismissal: <https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/dismissing-a-pull-request-review>

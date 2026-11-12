@@ -20,23 +20,27 @@ func mapUser(u apiUser) domain.User {
 
 func mapPullRequest(pr apiPullRequest, comments []apiComment) domain.PullRequest {
 	return domain.PullRequest{
-		PullRequestSummary: domain.PullRequestSummary{
-			Repo:         host + "/" + pr.Destination.Repository.FullName,
-			ID:           strconv.Itoa(pr.ID),
-			URL:          pr.Links.HTML.Href,
-			Title:        pr.Title,
-			State:        mapState(pr.State),
-			Draft:        pr.Draft,
-			Author:       mapUser(pr.Author),
-			SourceBranch: pr.Source.Branch.Name,
-			TargetBranch: pr.Destination.Branch.Name,
-			HeadCommit:   pr.Source.Commit.Hash,
-			CreatedAt:    domain.FormatTime(pr.CreatedOn),
-			UpdatedAt:    domain.FormatTime(pr.UpdatedOn),
-		},
-		Description: pr.Summary.Raw,
-		Reviewers:   mapReviewers(pr.Reviewers, pr.Participants),
-		Threads:     mapThreads(comments),
+		PullRequestSummary: mapSummary(pr),
+		Description:        pr.Summary.Raw,
+		Reviewers:          mapReviewers(pr.Reviewers, pr.Participants),
+		Threads:            mapThreads(comments),
+	}
+}
+
+func mapSummary(pr apiPullRequest) domain.PullRequestSummary {
+	return domain.PullRequestSummary{
+		Repo:         host + "/" + pr.Destination.Repository.FullName,
+		ID:           strconv.Itoa(pr.ID),
+		URL:          pr.Links.HTML.Href,
+		Title:        pr.Title,
+		State:        mapState(pr.State),
+		Draft:        pr.Draft,
+		Author:       mapUser(pr.Author),
+		SourceBranch: pr.Source.Branch.Name,
+		TargetBranch: pr.Destination.Branch.Name,
+		HeadCommit:   pr.Source.Commit.Hash,
+		CreatedAt:    domain.FormatTime(pr.CreatedOn),
+		UpdatedAt:    domain.FormatTime(pr.UpdatedOn),
 	}
 }
 

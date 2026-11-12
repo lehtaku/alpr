@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/lehtaku/alpr/internal/transport"
@@ -50,7 +51,7 @@ type apiParticipant struct {
 	State    *string `json:"state"` // approved, changes_requested or null
 }
 
-// apiPullRequest is a pull request as GET {pr} returns it; only that endpoint includes reviewers and participants.
+// apiPullRequest is a pull request. Only GET {pr} includes reviewers and participants; listings leave them out.
 type apiPullRequest struct {
 	ID      int    `json:"id"`
 	Title   string `json:"title"`
@@ -111,14 +112,47 @@ func (c *client) currentUser(ctx context.Context) (apiUser, error) {
 	return user, err
 }
 
+func pullRequestsPath(workspace, slug string) string {
+	return fmt.Sprintf("repositories/%s/%s/pullrequests", url.PathEscape(workspace), url.PathEscape(slug))
+}
+
 func pullRequestPath(workspace, slug, id string) string {
-	return fmt.Sprintf("repositories/%s/%s/pullrequests/%s", url.PathEscape(workspace), url.PathEscape(slug), url.PathEscape(id))
+	return pullRequestsPath(workspace, slug) + "/" + url.PathEscape(id)
 }
 
 func (c *client) pullRequest(ctx context.Context, workspace, slug, id string) (apiPullRequest, error) {
 	var pr apiPullRequest
 	_, err := c.http.Do(ctx, http.MethodGet, pullRequestPath(workspace, slug, id), nil, &pr)
 	return pr, err
+}
+
+// maxPageLen is the largest page size the pull request listing accepts.
+const maxPageLen = 50
+
+// openPullRequests returns at most limit open pull requests, most recently updated first; a non-empty reviewerUUID
+// keeps those with that requested reviewer. The state is part of the query because a q parameter overrides state.
+func (c *client) openPullRequests(ctx context.Context, workspace, slug, reviewerUUID string, limit int) ([]apiPullRequest, error) {
+	query := `state = "OPEN"`
+	if reviewerUUID != "" {
+		query += fmt.Sprintf(` AND reviewers.uuid = "%s"`, reviewerUUID)
+	}
+	params := url.Values{"q": {query}, "sort": {"-updated_on"}, "pagelen": {strconv.Itoa(min(limit, maxPageLen))}}
+	var prs []apiPullRequest
+	err := transport.Pages(pullRequestsPath(workspace, slug)+"?"+params.Encode(), func(path string) (string, error) {
+		var page struct {
+			Values []apiPullRequest `json:"values"`
+			Next   string           `json:"next"`
+		}
+		if _, err := c.http.Do(ctx, http.MethodGet, path, nil, &page); err != nil {
+			return "", err
+		}
+		prs = append(prs, page.Values...)
+		if len(prs) >= limit {
+			return "", nil
+		}
+		return page.Next, nil
+	})
+	return prs[:min(len(prs), limit)], err
 }
 
 // comments returns every comment of a pull request, oldest first, including deleted ones and replies.

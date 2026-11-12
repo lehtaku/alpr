@@ -66,6 +66,23 @@ func mapPullRequest(pr apiPullRequest, reviews []apiReview, comments []apiIssueC
 	}
 }
 
+func mapSearchPullRequest(pr apiSearchPullRequest) domain.PullRequestSummary {
+	return domain.PullRequestSummary{
+		Repo:         webHost(pr.URL) + "/" + pr.Repository.NameWithOwner,
+		ID:           strconv.Itoa(pr.Number),
+		URL:          pr.URL,
+		Title:        pr.Title,
+		State:        mapState(strings.ToLower(pr.State), pr.State == "MERGED"),
+		Draft:        pr.IsDraft,
+		Author:       mapActor(pr.Author),
+		SourceBranch: pr.HeadRefName,
+		TargetBranch: pr.BaseRefName,
+		HeadCommit:   pr.HeadRefOid,
+		CreatedAt:    domain.FormatTime(pr.CreatedAt),
+		UpdatedAt:    domain.FormatTime(pr.UpdatedAt),
+	}
+}
+
 // webHost is github.com, or the GitHub Enterprise Server host, taken from the pull request's web URL.
 func webHost(htmlURL string) string {
 	u, err := url.Parse(htmlURL)

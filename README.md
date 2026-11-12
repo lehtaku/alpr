@@ -4,7 +4,7 @@ A command-line tool for routine code-review work on pull requests across Git hos
 
 Supported platforms: Bitbucket Cloud and GitHub.
 
-**Status:** early development. Working so far: `auth set`, `auth test`, and `pr show`. The planned interface is in [docs/spec.md](docs/spec.md); see [Not implemented yet](#not-implemented-yet).
+**Status:** early development. Working so far: `auth set`, `auth test`, `pr show` and `pr list` (without `--all-repos`). The planned interface is in [docs/spec.md](docs/spec.md); see [Not implemented yet](#not-implemented-yet).
 
 ## Install
 
@@ -45,7 +45,7 @@ Create an API token with scopes at [Atlassian account → Security → API token
 | Scope | Used by |
 |---|---|
 | `read:user:bitbucket` | `auth test`, and `@me` in later commands |
-| `read:pullrequest:bitbucket` | `pr show`; later `pr list`, `pr comment` and the diff-line check |
+| `read:pullrequest:bitbucket` | `pr show`, `pr list`; later `pr comment` and the diff-line check |
 | `write:pullrequest:bitbucket` | later `pr unblock` (removing your change request) |
 | `read:repository:bitbucket` | later `pr list --all-repos` (listing a workspace's repositories) |
 
@@ -58,7 +58,7 @@ Create a [fine-grained personal access token](https://github.com/settings/person
 | Permission | Used by |
 |---|---|
 | Metadata: read (added automatically) | every command |
-| Pull requests: read and write | `pr show`; later `pr list`, `pr comment` and `pr unblock` (write is needed for commenting and dismissing your review) |
+| Pull requests: read and write | `pr show`, `pr list`; later `pr comment` and `pr unblock` (write is needed for commenting and dismissing your review) |
 
 `auth test` works with any valid token. No Issues permission is needed: `pr show` reads conversation comments with the Pull requests permission.
 
@@ -172,11 +172,35 @@ src/a.go:10-12 (new side), unresolved
 - On Bitbucket, `head_commit` is an abbreviated hash and `outdated` is always `null`.
 - On GitHub, people are shown by login. Conversation comments and review summaries are general threads that can't be resolved (`resolved` is `null`), and an outdated review thread may have no current `line`. Deleted accounts appear as `ghost`.
 
+### `alpr pr list`
+
+Lists open pull requests in the repository, most recently updated first.
+
+```sh
+alpr pr list                        # inside a clone of the repository
+alpr pr list --reviewer @me         # only the ones you're reviewing
+alpr pr list --reviewer <login> --limit 10 --json
+```
+
+```
+REPO                       ID  TITLE               AUTHOR       UPDATED
+bitbucket.org/<ws>/<repo>  43  [draft] Draft idea  Some Person  2026-11-01T10:00:00Z
+bitbucket.org/<ws>/<repo>  42  Add parser          Your Name    2026-10-31T09:15:00Z
+```
+
+| Flag | Meaning |
+|---|---|
+| `--reviewer <user>` | only pull requests this user is reviewing: `@me`, a GitHub login, or a Bitbucket account UUID (`{…}`, shown as `id` by `alpr auth test --json`) |
+| `--limit <n>` | at most n pull requests (default 50) |
+
+- On GitHub, `--reviewer` matches pull requests where the user is requested (directly or through a team) or has already submitted a review. New pull requests can take a few seconds to show up in GitHub's search.
+- On Bitbucket, `--reviewer` matches only pull requests where the user is a requested reviewer. Bitbucket can't search by participant, so a pull request you approved or commented on without being added as a reviewer isn't listed.
+
 ### Not implemented yet
 
 These are specified in [docs/spec.md](docs/spec.md) §5 and will be documented here as they land:
 
-- [ ] `pr list [--reviewer <user>] [--all-repos] [--limit <n>]`: open pull requests, optionally only where you're a reviewer
+- [ ] `pr list --all-repos`: open pull requests across every repository your profiles cover
 - [ ] `pr comment <id>`: inline or general comment, with `--dry-run`
 - [ ] `pr unblock <id>`: clear your "changes requested" status once your comments are handled
 

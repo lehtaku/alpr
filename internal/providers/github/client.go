@@ -115,6 +115,40 @@ type apiReviewThread struct {
 	Comments   apiReviewComments `json:"comments"`
 }
 
+// apiSearchPullRequest is a pull request node from a GraphQL search.
+type apiSearchPullRequest struct {
+	Number      int       `json:"number"`
+	URL         string    `json:"url"`
+	Title       string    `json:"title"`
+	State       string    `json:"state"` // OPEN, CLOSED or MERGED
+	IsDraft     bool      `json:"isDraft"`
+	Author      *apiActor `json:"author"`
+	HeadRefName string    `json:"headRefName"`
+	BaseRefName string    `json:"baseRefName"`
+	HeadRefOid  string    `json:"headRefOid"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	Repository  struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+}
+
+const searchPullRequestsQuery = `query($query: String!, $first: Int!, $cursor: String) {
+  search(query: $query, type: ISSUE, first: $first, after: $cursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      ... on PullRequest {
+        number url title state isDraft headRefName baseRefName headRefOid createdAt updatedAt
+        author { login ... on User { databaseId } ... on Bot { databaseId } }
+        repository { nameWithOwner }
+      }
+    }
+  }
+}`
+
+// maxSearchPage is the largest page a GraphQL connection returns.
+const maxSearchPage = 100
+
 const reviewCommentFields = `pageInfo { hasNextPage endCursor }
 nodes {
   fullDatabaseId state body createdAt updatedAt url
@@ -211,6 +245,29 @@ func (c *client) issueComments(ctx context.Context, owner, repo string, number i
 		return transport.LinkNext(header), nil
 	})
 	return comments, err
+}
+
+// searchPullRequests returns at most limit pull requests matching a search query, in the order the query sorts them.
+func (c *client) searchPullRequests(ctx context.Context, query string, limit int) ([]apiSearchPullRequest, error) {
+	var prs []apiSearchPullRequest
+	err := transport.Pages("", func(cursor string) (string, error) {
+		var data struct {
+			Search struct {
+				PageInfo apiPageInfo            `json:"pageInfo"`
+				Nodes    []apiSearchPullRequest `json:"nodes"`
+			} `json:"search"`
+		}
+		variables := map[string]any{"query": query, "first": min(limit-len(prs), maxSearchPage), "cursor": nullable(cursor)}
+		if err := c.graphql(ctx, searchPullRequestsQuery, variables, &data); err != nil {
+			return "", err
+		}
+		prs = append(prs, data.Search.Nodes...)
+		if len(prs) >= limit {
+			return "", nil
+		}
+		return nextCursor(data.Search.PageInfo), nil
+	})
+	return prs[:min(len(prs), limit)], err
 }
 
 // reviewThreads returns every review thread of a pull request with all of its comments.

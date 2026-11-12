@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -14,8 +15,39 @@ import (
 
 func newPRCommand(flags *globalFlags) *cobra.Command {
 	pr := &cobra.Command{Use: "pr", Short: "Work with pull requests"}
-	pr.AddCommand(newPRShowCommand(flags))
+	pr.AddCommand(newPRListCommand(flags), newPRShowCommand(flags))
 	return pr
+}
+
+func newPRListCommand(flags *globalFlags) *cobra.Command {
+	var reviewer string
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List open pull requests, most recently updated first",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			repo, err := currentRepo(flags)
+			if err != nil {
+				return err
+			}
+			list, err := services.ListPullRequests(cmd.Context(), cfg, flags.profile, repo, reviewer, limit)
+			if err != nil {
+				return err
+			}
+			if flags.json {
+				return writeJSON(cmd.OutOrStdout(), list)
+			}
+			return writePullRequestList(cmd.OutOrStdout(), list.PullRequests)
+		},
+	}
+	cmd.Flags().StringVar(&reviewer, "reviewer", "", "only pull requests this user is asked to review or has reviewed: @me, a GitHub login or a Bitbucket account UUID")
+	cmd.Flags().IntVar(&limit, "limit", 50, "the most pull requests to list")
+	return cmd
 }
 
 func newPRShowCommand(flags *globalFlags) *cobra.Command {
@@ -50,6 +82,23 @@ func currentRepo(flags *globalFlags) (string, error) {
 		return gitinfo.ParseRepo(flags.repo)
 	}
 	return gitinfo.OriginRepo(".")
+}
+
+func writePullRequestList(w io.Writer, prs []domain.PullRequestSummary) error {
+	if len(prs) == 0 {
+		_, err := io.WriteString(w, "No open pull requests.\n")
+		return err
+	}
+	table := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(table, "REPO\tID\tTITLE\tAUTHOR\tUPDATED")
+	for _, pr := range prs {
+		title := pr.Title
+		if pr.Draft {
+			title = "[draft] " + title
+		}
+		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", pr.Repo, pr.ID, title, pr.Author.DisplayName, pr.UpdatedAt)
+	}
+	return table.Flush()
 }
 
 func writePullRequest(w io.Writer, pr domain.PullRequest) error {

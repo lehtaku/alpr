@@ -2,6 +2,8 @@ package bitbucketcloud
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -155,5 +157,72 @@ func TestMapState(t *testing.T) {
 		if got := mapState(state); got != want {
 			t.Errorf("%s: %s, want %s", state, got, want)
 		}
+	}
+}
+
+func listedPullRequestJSON(id int, updated string) string {
+	return fmt.Sprintf(`{"id": %d, "title": "PR %d", "state": "OPEN", "draft": false,
+  "author": {"uuid": "{a}", "nickname": "author", "display_name": "Author Person"},
+  "source": {"branch": {"name": "feature/%d"}, "commit": {"hash": "abc%d"}},
+  "destination": {"branch": {"name": "main"}, "repository": {"full_name": "ws/repo"}},
+  "created_on": "2026-10-30T08:00:00+00:00", "updated_on": "%s",
+  "links": {"html": {"href": "https://bitbucket.org/ws/repo/pull-requests/%d"}}}`, id, id, id, id, updated, id)
+}
+
+func TestPullRequests(t *testing.T) {
+	tests := []struct {
+		name, reviewer, wantQuery string
+	}{
+		{"all", "", `state = "OPEN"`},
+		{"@me", "@me", `state = "OPEN" AND reviewers.uuid = "{me}"`},
+		{"account UUID", "{0a1b-2c3d}", `state = "OPEN" AND reviewers.uuid = "{0a1b-2c3d}"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				const listPath = "/2.0/repositories/ws/repo/pullrequests"
+				query := r.URL.Query()
+				switch {
+				case r.URL.Path == "/2.0/user":
+					_, _ = w.Write([]byte(`{"uuid": "{me}", "nickname": "me", "display_name": "Me"}`))
+				case r.URL.Path != listPath || query.Get("q") != tt.wantQuery || query.Get("sort") != "-updated_on" ||
+					query.Get("pagelen") != "3" || query.Has("state"):
+					http.Error(w, "unexpected request", http.StatusTeapot)
+				case query.Get("page") == "2":
+					_, _ = w.Write([]byte(`{"values": [` + listedPullRequestJSON(3, "2026-10-31T07:00:00+00:00") + `,` +
+						listedPullRequestJSON(4, "2026-10-31T06:00:00+00:00") + `]}`))
+				default:
+					next := server.URL + listPath + "?" + query.Encode() + "&page=2"
+					_, _ = w.Write([]byte(`{"next": "` + next + `", "values": [` + listedPullRequestJSON(1, "2026-10-31T09:00:00+00:00") + `,` +
+						listedPullRequestJSON(2, "2026-10-31T08:00:00+00:00") + `]}`))
+				}
+			}))
+			defer server.Close()
+
+			prs, err := New(server.URL+"/2.0", "secret").PullRequests(context.Background(), "ws", "repo", tt.reviewer, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, pr := range prs {
+				ids = append(ids, pr.ID)
+			}
+			if got := strings.Join(ids, " "); got != "1 2 3" {
+				t.Fatalf("ids %s", got)
+			}
+			if pr := prs[0]; pr.Repo != "bitbucket.org/ws/repo" || pr.State != domain.PullRequestOpen || pr.SourceBranch != "feature/1" ||
+				pr.HeadCommit != "abc1" || pr.UpdatedAt != "2026-10-31T09:00:00Z" || pr.Author.DisplayName != "Author Person" {
+				t.Errorf("first pull request %+v", pr)
+			}
+		})
+	}
+}
+
+func TestPullRequestsRejectsReviewer(t *testing.T) {
+	_, err := New("http://127.0.0.1:1", "secret").PullRequests(context.Background(), "ws", "repo", `x" OR state = "MERGED`, 50)
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != domain.CodeUsage || !strings.Contains(domainErr.Message, "account UUID") {
+		t.Errorf("error %v", err)
 	}
 }

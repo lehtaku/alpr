@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// prConfig serves Bitbucket pull request 42 of ws/repo with one inline thread, and writes a config with a
-// Bitbucket profile for ws/*.
+// prConfig serves Bitbucket pull request 42 of ws/repo with one inline thread, a listing of two open pull requests
+// of which the first is a draft, and writes a config with a Bitbucket profile for ws/*.
 func prConfig(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +30,15 @@ func prConfig(t *testing.T) {
   "reviewers": [{"uuid": "{ann}", "nickname": "ann", "display_name": "Ann"}, {"uuid": "{bob}", "nickname": "bob", "display_name": "Bob"}],
   "participants": [{"user": {"uuid": "{ann}", "nickname": "ann", "display_name": "Ann"}, "role": "REVIEWER", "approved": true, "state": "approved"}]
 }`))
+		case r.URL.Path == "/2.0/repositories/ws/repo/pullrequests" && r.URL.Query().Get("q") == `state = "OPEN"`:
+			_, _ = w.Write([]byte(`{"values": [
+  {"id": 43, "title": "Draft idea", "state": "OPEN", "draft": true, "author": {"uuid": "{b}", "display_name": "Bob"},
+   "destination": {"branch": {"name": "main"}, "repository": {"full_name": "ws/repo"}}, "updated_on": "2026-11-01T10:00:00+00:00"},
+  {"id": 42, "title": "Add parser", "state": "OPEN", "author": {"uuid": "{a}", "display_name": "Author Person"},
+   "destination": {"branch": {"name": "main"}, "repository": {"full_name": "ws/repo"}}, "updated_on": "2026-10-31T09:15:00+00:00"}
+]}`))
+		case r.URL.Path == "/2.0/repositories/ws/repo/pullrequests":
+			_, _ = w.Write([]byte(`{"values": []}`))
 		case r.URL.Path == prPath+"/comments":
 			_, _ = w.Write([]byte(`{"values": [
   {"id": 1, "inline": {"path": "src/a.go", "to": 12, "start_to": 10}, "content": {"raw": "Rename this.\nIt's unclear."},
@@ -135,6 +144,70 @@ func TestPRShowErrors(t *testing.T) {
 		{"bad --repo", []string{"pr", "show", "42", "--repo", "ws/repo"}, 2, "is not of the form host/owner/repo"},
 		{"no matching profile", []string{"pr", "show", "42", "--repo", "bitbucket.org/other/repo"}, 2, "no profile matches"},
 		{"unknown pull request", []string{"pr", "show", "7", "--repo", "bitbucket.org/ws/repo"}, 4, "Resource not found"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, stdout, stderr := runArgs(tt.args...)
+			if code != tt.wantCode || stdout != "" || !strings.Contains(stderr, tt.wantMsg) {
+				t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestPRListText(t *testing.T) {
+	prConfig(t)
+	code, stdout, stderr := runArgs("pr", "list", "--repo", "bitbucket.org/ws/repo")
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	want := `REPO                   ID  TITLE               AUTHOR         UPDATED
+bitbucket.org/ws/repo  43  [draft] Draft idea  Bob            2026-11-01T10:00:00Z
+bitbucket.org/ws/repo  42  Add parser          Author Person  2026-10-31T09:15:00Z
+`
+	if stdout != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+	}
+}
+
+func TestPRListJSON(t *testing.T) {
+	prConfig(t)
+	code, stdout, stderr := runArgs("pr", "list", "--repo", "bitbucket.org/ws/repo", "--limit", "1", "--json")
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	var got struct {
+		PullRequests []map[string]any `json:"pull_requests"`
+		Errors       []any            `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("stdout isn't JSON: %v\n%s", err, stdout)
+	}
+	if len(got.PullRequests) != 1 || got.PullRequests[0]["id"] != "43" || got.PullRequests[0]["draft"] != true ||
+		got.Errors == nil || len(got.Errors) != 0 {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+}
+
+func TestPRListEmpty(t *testing.T) {
+	prConfig(t)
+	code, stdout, stderr := runArgs("pr", "list", "--repo", "bitbucket.org/ws/repo", "--reviewer", "{0000-0000}")
+	if code != 0 || stderr != "" || stdout != "No open pull requests.\n" {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestPRListErrors(t *testing.T) {
+	prConfig(t)
+	tests := []struct {
+		name     string
+		args     []string
+		wantCode int
+		wantMsg  string
+	}{
+		{"zero limit", []string{"pr", "list", "--repo", "bitbucket.org/ws/repo", "--limit", "0"}, 2, "--limit must be at least 1"},
+		{"bad reviewer", []string{"pr", "list", "--repo", "bitbucket.org/ws/repo", "--reviewer", "bob"}, 2, "account UUID"},
+		{"positional argument", []string{"pr", "list", "42", "--repo", "bitbucket.org/ws/repo"}, 2, "unknown command"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
